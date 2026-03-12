@@ -1,16 +1,36 @@
-# Python junk
+# Virtual Environment
+venv/
+.venv/
+env/
+
+# Python artifacts
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+*.so
+
+# Build and Distribution
 build/
+develop-eggs/
 dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
 *.egg-info/
 
-# OS junk
-.DS_Store
-
-# Lumicron Data (Do not upload raw forensics to the code repo)
+# Data Folders (The heavy stuff)
 01_RAW/
 02_FRAMES/
 03_ANALYSIS/
 04_REPORTS/
 05_FIGURES/
+
+# OS Specific
+.DS_Store
+Thumbs.db
