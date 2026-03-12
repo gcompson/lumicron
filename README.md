@@ -1,15 +1,15 @@
-# 🛸 LUMICRON: Hypersonic UAP Forensic Suite
+# LUMICRON: Hypersonic UAP Forensic Suite
 
 **Lumicron** is a high-speed video analysis toolkit designed to identify, isolate, and audit kinematic anomalies (UAPs/UFOs) from high-frame-rate digital sensors. It provides a standardized forensic pipeline from raw video ingestion to AI-assisted physics reporting.
 
 ---
 
-## 🔬 Core Philosophy
+## Core Philosophy
 Lumicron focuses on **Kinematic Discontinuity**. By leveraging Background Subtraction (MOG2) and Smear-Ratio Analysis, it isolates objects moving at speeds or trajectories that defy conventional biological or aeronautical profiles.
 
 ---
 
-## 🛠️ Installation
+## Installation
 
 ### 1. Prerequisites
 Ensure you have **Python 3.9+** and **FFmpeg** (with `ffprobe`) installed on your system.
@@ -23,27 +23,27 @@ pip install -e .
 
 ---
 
-## 🚀 Standard Forensic Workflow
+## Standard Forensic Workflow
 
-### 🏗️ 1. Initialize
+### 1. Initialize
 Create a localized project folder and manifest.
 ```bash
 lumicron init Project_Alpha --location "Hamilton, Australia"
 ```
 
-### 🎞️ 2. Extract
+### 2. Extract
 Ingest video into the **01_RAW** folder and extract high-speed frames.
 ```bash
 lumicron extract ~/Downloads/capture.mov Project_Alpha --start 00:00:15 --end 00:00:20
 ```
 
-### 🔍 3. Scan
+### 3. Scan
 Run the motion detection engine with Smear Filtering.
 ```bash
 lumicron scan Project_Alpha --sensitivity 70 --min-smear 2.5
 ```
 
-### 📊 4. Report
+### 4. Report
 Generate evidence packets, heatmaps, and AI-ready prompts.
 ```bash
 lumicron report heatmap Project_Alpha
@@ -54,7 +54,7 @@ lumicron report brief Project_Alpha
 
 ---
 
-## 🏛️ Directory Structure
+## Directory Structure
 * **01_RAW/**: Master source video and ingestion logs.
 * **02_FRAMES/**: Extracted high-speed PNGs (The "Source of Truth").
 * **03_ANALYSIS/**: CSV transit logs and kinematic telemetry.
@@ -63,12 +63,12 @@ lumicron report brief Project_Alpha
 
 ---
 
-## 🤖 AI Integration
+## AI Integration
 Lumicron creates a **Dynamic Context Window** to bridge the gap between raw data and expert analysis. The \`report prompt\` command pulls data from the \`lumicron.yaml\` and the \`transit_log.csv\` to create a scientific briefing. Paste this into an LLM for an objective assessment.
 
 ---
 
-## 🤝 Contributing
+## Contributing
 Lumicron is an open-source project for the global research community. Contributions are welcome for:
 * **New reporting modules**: Trajectory plots and velocity graphs.
 * **Sensor Integration**: FLIR and multispectral support.
