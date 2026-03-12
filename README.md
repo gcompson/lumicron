@@ -1,6 +1,6 @@
 # 🛸 LUMICRON: Hypersonic UAP Forensic Suite
 
-**Lumicron** is a high-speed video analysis toolkit designed to identify, isolate, and audit kinematic anomalies (UAPs/UFOs). It provides a standardized forensic pipeline from raw video ingestion to AI-assisted physics reporting.
+**Lumicron** is a high-speed video analysis toolkit designed to identify, isolate, and audit kinematic anomalies (UAPs/UFOs) from high-frame-rate digital sensors. It provides a standardized forensic pipeline from raw video ingestion to AI-assisted physics reporting.
 
 ---
 
@@ -12,11 +12,11 @@ Lumicron focuses on **Kinematic Discontinuity**. By leveraging Background Subtra
 ## 🛠️ Installation
 
 ### 1. Prerequisites
-Ensure you have **Python 3.9+** and **FFmpeg** (with \`ffprobe\`) installed on your system.
+Ensure you have **Python 3.9+** and **FFmpeg** (with `ffprobe`) installed on your system.
 
 ### 2. Clone and Install
 \`\`\`bash
-git clone https://github.com/gcompson/lumicron.git
+git clone [https://github.com/gcompson/lumicron.git](https://github.com/gcompson/lumicron.git)
 cd lumicron
 pip install -e .
 \`\`\`
