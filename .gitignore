@@ -1,0 +1,16 @@
+# Python junk
+__pycache__/
+*.pyc
+build/
+dist/
+*.egg-info/
+
+# OS junk
+.DS_Store
+
+# Lumicron Data (Do not upload raw forensics to the code repo)
+01_RAW/
+02_FRAMES/
+03_ANALYSIS/
+04_REPORTS/
+05_FIGURES/
