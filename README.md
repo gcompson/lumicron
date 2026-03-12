@@ -15,11 +15,11 @@ Lumicron focuses on **Kinematic Discontinuity**. By leveraging Background Subtra
 Ensure you have **Python 3.9+** and **FFmpeg** (with `ffprobe`) installed on your system.
 
 ### 2. Clone and Install
-\`\`\`bash
+```bash
 git clone [https://github.com/gcompson/lumicron.git](https://github.com/gcompson/lumicron.git)
 cd lumicron
 pip install -e .
-\`\`\`
+```
 
 ---
 
@@ -27,30 +27,30 @@ pip install -e .
 
 ### 🏗️ 1. Initialize
 Create a localized project folder and manifest.
-\`\`\`bash
+```bash
 lumicron init Project_Alpha --location "Hamilton, Australia"
-\`\`\`
+```
 
 ### 🎞️ 2. Extract
 Ingest video into the **01_RAW** folder and extract high-speed frames.
-\`\`\`bash
+```bash
 lumicron extract ~/Downloads/capture.mov Project_Alpha --start 00:00:15 --end 00:00:20
-\`\`\`
+```
 
 ### 🔍 3. Scan
 Run the motion detection engine with Smear Filtering.
-\`\`\`bash
+```bash
 lumicron scan Project_Alpha --sensitivity 70 --min-smear 2.5
-\`\`\`
+```
 
 ### 📊 4. Report
 Generate evidence packets, heatmaps, and AI-ready prompts.
-\`\`\`bash
+```bash
 lumicron report heatmap Project_Alpha
 lumicron report crops Project_Alpha --enhance
 lumicron report prompt Project_Alpha
 lumicron report brief Project_Alpha
-\`\`\`
+```
 
 ---
 
