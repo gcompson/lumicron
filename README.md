@@ -1,5 +1,8 @@
 # LUMICRON: Hypersonic UAP Forensic Suite
 
+![License](https://img.shields.io/badge/license-MIT-green)
+![Version](https://img.shields.io/badge/version-1.0.0-blue)
+
 **Lumicron** is a high-speed video analysis toolkit designed to identify, isolate, and audit kinematic anomalies (UAPs/UFOs) from high-frame-rate digital sensors. It provides a standardized forensic pipeline from raw video ingestion to AI-assisted physics reporting.
 
 ---
