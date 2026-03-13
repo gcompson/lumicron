@@ -1,6 +1,8 @@
 import numpy as np
 import cv2
 import os
+import sys
+import time
 from scipy.fftpack import fft
 from concurrent.futures import ThreadPoolExecutor
 
@@ -24,22 +26,26 @@ class RadiometricEngine:
     @staticmethod
     def analyze_luminance(project_path):
         frames_dir = os.path.join(project_path, "02_FRAMES")
-        if not os.path.exists(frames_dir): return None
-        
         frame_files = sorted([os.path.join(frames_dir, f) for f in os.listdir(frames_dir) if f.lower().endswith(('.png', '.jpg'))])
-        if not frame_files: return None
+        total = len(frame_files)
+        if total == 0: return None
 
-        def get_intensity(f_path):
+        def process_frame(f_path):
             img = cv2.imread(f_path, cv2.IMREAD_GRAYSCALE)
-            if img is not None:
-                # Use OpenCL-accelerated minMaxLoc if enabled
-                _, max_val, _, _ = cv2.minMaxLoc(img)
-                return max_val
-            return None
+            return cv2.minMaxLoc(img)[1] if img is not None else None
 
-        # ThreadPool for parallel I/O
+        intensities = []
+        print(f"Scanning {total} frames for Luminance...")
+        
         with ThreadPoolExecutor() as executor:
-            intensities = list(filter(None, executor.map(get_intensity, frame_files)))
+            for i, val in enumerate(executor.map(process_frame, frame_files)):
+                if val is not None: intensities.append(val)
+                percent = int((i + 1) / total * 100)
+                # The \r carriage return resets the line
+                sys.stdout.write(f"\r\033[KProgress: [{percent}%] Frame {i+1}/{total}")
+                sys.stdout.flush()
+        
+        print("\nLuminance Scan Complete.")
         
         if len(intensities) < 2: return {"peak_intensity": 0, "pulse_freq": 0}
         arr = np.array(intensities)
@@ -52,11 +58,11 @@ class MorphologicalEngine:
     @staticmethod
     def analyze_shape_stability(project_path):
         frames_dir = os.path.join(project_path, "02_FRAMES")
-        if not os.path.exists(frames_dir): return 0.0
-        
         frame_files = sorted([os.path.join(frames_dir, f) for f in os.listdir(frames_dir) if f.lower().endswith(('.png', '.jpg'))])
-        
-        def get_aspect_ratio(f_path):
+        total = len(frame_files)
+        if total == 0: return 0.0
+
+        def process_morph(f_path):
             img = cv2.imread(f_path, cv2.IMREAD_GRAYSCALE)
             if img is None: return None
             _, thresh = cv2.threshold(img, 15, 255, cv2.THRESH_BINARY)
@@ -64,71 +70,71 @@ class MorphologicalEngine:
             if contours:
                 c = max(contours, key=cv2.contourArea)
                 x, y, w, h = cv2.boundingRect(c)
-                if h > 0: return w / h
+                return w / h if h > 0 else None
             return None
 
+        aspect_ratios = []
+        print(f"Analyzing Morphology of {total} frames...")
+        
         with ThreadPoolExecutor() as executor:
-            aspect_ratios = list(filter(None, executor.map(get_aspect_ratio, frame_files)))
-            
+            for i, val in enumerate(executor.map(process_morph, frame_files)):
+                if val is not None: aspect_ratios.append(val)
+                percent = int((i + 1) / total * 100)
+                sys.stdout.write(f"\r\033[KProgress: [{percent}%] Frame {i+1}/{total}")
+                sys.stdout.flush()
+
+        print("\nMorphology Analysis Complete.")
         return float(np.var(aspect_ratios)) if aspect_ratios else 0.0
 
 class ArtifactEngine:
     @staticmethod
     def detect_noise_signature(project_path):
         frames_dir = os.path.join(project_path, "02_FRAMES")
-        if not os.path.exists(frames_dir): return "Folder Missing"
-        
         frame_files = sorted([os.path.join(frames_dir, f) for f in os.listdir(frames_dir) if f.lower().endswith(('.png', '.jpg'))])
         if len(frame_files) < 10: return "Insufficient Frames"
         
-        def get_max_loc(f_path):
-            img = cv2.imread(f_path, cv2.IMREAD_GRAYSCALE)
+        coords = []
+        for f in frame_files[:10]:
+            img = cv2.imread(f, cv2.IMREAD_GRAYSCALE)
             if img is not None:
-                _, _, _, max_loc = cv2.minMaxLoc(img)
-                return max_loc
-            return None
-
-        with ThreadPoolExecutor() as executor:
-            coords = list(filter(None, executor.map(get_max_loc, frame_files[:10])))
+                coords.append(cv2.minMaxLoc(img)[3])
         
         if not coords: return "Unreadable Data"
-        if all(c == coords[0] for c in coords):
-            return "REJECTED: Static Sensor Artifact"
-        
-        return "VERIFIED: Dynamic Motion"
+        return "REJECTED: Static Sensor Artifact" if all(c == coords[0] for c in coords) else "VERIFIED: Dynamic Motion"
 
-class ThermalEngine:
+class VisualTracker:
     @staticmethod
-    def analyze_heat_gradient(project_path):
-        # Placeholder for FLIR/Radiometric JPEG processing
-        return "Thermal Module: Earmarked for Future Implementation"
+    def manual_track(project_path):
+        frames_dir = os.path.join(project_path, "02_FRAMES")
+        frame_files = sorted([os.path.join(frames_dir, f) for f in os.listdir(frames_dir)])
+        if len(frame_files) < 2: return None
 
-class SpectralEngine:
-    @staticmethod
-    def extract_wavelengths(project_path, grating_lines_mm=300):
-        # Placeholder for diffraction grating spectroscopy
-        return "Spectral Module: Earmarked for Future Implementation"
+        # Load first and last frames
+        img1 = cv2.imread(frame_files[0])
+        img2 = cv2.imread(frame_files[-1])
+        points = []
 
-class ThermalEngine:
-    @staticmethod
-    def analyze_heat_gradient(project_path):
-        # Placeholder for FLIR/Radiometric JPEG processing
-        return "Thermal Module: Earmarked for Future Implementation"
+        def click_event(event, x, y, flags, param):
+            if event == cv2.EVENT_LBUTTONDOWN:
+                points.append((x, y))
+                cv2.circle(param, (x, y), 10, (0, 255, 0), -1)
+                cv2.imshow("Select Object", param)
 
-class SpectralEngine:
-    @staticmethod
-    def extract_wavelengths(project_path, grating_lines_mm=300):
-        # Placeholder for diffraction grating spectroscopy
-        return "Spectral Module: Earmarked for Future Implementation"
+        print("\n--- MANUAL TRACKING ---")
+        print("1. Click the object in the FIRST frame, then press ANY KEY.")
+        cv2.imshow("Select Object", img1)
+        cv2.setMouseCallback("Select Object", click_event, img1)
+        cv2.waitKey(0)
 
-class ThermalEngine:
-    @staticmethod
-    def analyze_heat_gradient(project_path):
-        # Placeholder for FLIR/Radiometric JPEG processing
-        return "Thermal Module: Earmarked for Future Implementation"
+        print("2. Click the object in the LAST frame, then press ANY KEY.")
+        cv2.imshow("Select Object", img2)
+        cv2.setMouseCallback("Select Object", click_event, img2)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
 
-class SpectralEngine:
-    @staticmethod
-    def extract_wavelengths(project_path, grating_lines_mm=300):
-        # Placeholder for diffraction grating spectroscopy
-        return "Spectral Module: Earmarked for Future Implementation"
+        if len(points) >= 2:
+            dx = points[1][0] - points[0][0]
+            dy = points[1][1] - points[0][1]
+            pixel_dist = np.sqrt(dx**2 + dy**2)
+            return pixel_dist, len(frame_files)
+        return None
