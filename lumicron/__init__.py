@@ -59,15 +59,26 @@ def main():
 
     project_path = os.path.abspath(args.project)
 
-    if args.command == "init":
+if args.command == "init":
         print(f"--- INITIALIZING: {args.project} ---")
         for folder in ["01_RAW", "02_FRAMES", "03_DATA", "04_REPORTS"]:
             os.makedirs(os.path.join(project_path, folder), exist_ok=True)
-        source_ext = os.path.splitext(args.source)[1]
-        dest_video = os.path.join(project_path, "01_RAW", f"source{source_ext}")
+        
+        # Keep original filename
+        original_name = os.path.basename(args.source)
+        dest_video = os.path.join(project_path, "01_RAW", original_name)
+        
+        print(f"Archiving: {original_name}")
         subprocess.run(["cp", args.source, dest_video])
+        
         print("Extracting frames via FFmpeg...")
-        subprocess.run(["ffmpeg", "-i", dest_video, "-q:v", "2", os.path.join(project_path, "02_FRAMES", "frame_%03d.png")])
+        # Point FFmpeg to the preserved filename
+        extract_cmd = [
+            "ffmpeg", "-i", dest_video, 
+            "-q:v", "2", 
+            os.path.join(project_path, "02_FRAMES", "frame_%03d.png")
+        ]
+        subprocess.run(extract_cmd)
 
     elif args.command == "visualize":
         # Passing the new mask and filter flags to the physics engine
