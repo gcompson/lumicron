@@ -1,25 +1,18 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 
 setup(
     name='lumicron',
     version='1.0.0',
-    # Points to the 'core' folder as the source of the package
-    package_dir={'': 'core'},
-    py_modules=['lumicron'],
+    packages=find_packages(),
+    include_package_data=True,
     install_requires=[
-        'click',
-        'pandas',
-        'opencv-python',
         'numpy',
-        'pyyaml',
-        'tqdm',
-        'matplotlib',
-        'fpdf2'
+        'scipy',
+        'opencv-python',
     ],
     entry_points={
         'console_scripts': [
-            'lumicron = lumicron:cli',
+            'lumicron = lumicron:main',
         ],
     },
-    python_requires='>=3.9',
 )

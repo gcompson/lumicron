@@ -6,6 +6,7 @@ env/
 # Python artifacts
 __pycache__/
 *.py[cod]
+*.pyc
 *$py.class
 *.so
 
@@ -30,6 +31,11 @@ wheels/
 03_ANALYSIS/
 04_REPORTS/
 05_FIGURES/
+*_Project*/
+*_Sighting*/
+
+# allow reports to be tracked
+!**/04_REPORTS/*.txt
 
 # OS Specific
 .DS_Store
