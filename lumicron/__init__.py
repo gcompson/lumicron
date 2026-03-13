@@ -39,8 +39,11 @@ def main():
     # 4. NOISE
     subparsers.add_parser('noise', help='Run artifact rejection').add_argument('project')
 
-    # 5. VISUALIZE (The New Tracker)
-    subparsers.add_parser('visualize', help='Manual point-track for real speed').add_argument('project')
+    # 5. VISUALIZE (The Filtered Tracker)
+    vis_p = subparsers.add_parser('visualize', help='Manual point-track with optional filters')
+    vis_p.add_argument('project')
+    vis_p.add_argument('--mask', action='store_true', help='Enable Red Motion Masking')
+    vis_p.add_argument('--filter', action='store_true', help='Enable Cloud/Edge Filtering')
 
     # 6. REPORT
     report_p = subparsers.add_parser('report', help='Generate complete dossier')
@@ -67,7 +70,8 @@ def main():
         subprocess.run(["ffmpeg", "-i", dest_video, "-q:v", "2", os.path.join(project_path, "02_FRAMES", "frame_%03d.png")])
 
     elif args.command == "visualize":
-        data = VisualTracker.manual_track(project_path)
+        # Passing the new mask and filter flags to the physics engine
+        data = VisualTracker.manual_track(project_path, use_mask=args.mask, use_filter=args.filter)
         if data:
             dist, frames = data
             tracking_file = os.path.join(project_path, "03_DATA", "tracking.json")
@@ -93,12 +97,10 @@ def main():
         m = MorphologicalEngine.analyze_shape_stability(project_path)
         n = ArtifactEngine.detect_noise_signature(project_path)
         
-        # Look for real tracking data
         tracking_file = os.path.join(project_path, "03_DATA", "tracking.json")
         if os.path.exists(tracking_file):
             with open(tracking_file, 'r') as f:
                 t_data = json.load(f)
-            # Use real delta-x/y for kinematics
             k = KinematicsEngine.calculate_telemetry([t_data['pixel_dist']], args.distance, args.focal, 36.0, 3840, args.fps)
             mode = "REAL"
         else:
