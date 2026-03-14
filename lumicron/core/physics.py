@@ -8,30 +8,39 @@ from concurrent.futures import ThreadPoolExecutor
 
 class KinematicsEngine:
     @staticmethod
-    def calculate_telemetry(pixel_shifts, distance_m, focal_input, sensor_w_mm, img_w_px, fps):
+    def calculate_telemetry(pixel_shifts, distance_m, focal_input, sensor_w_mm, img_w_px, fps, bg_shifts=None):
+        """
+        bg_shifts: Optional list of pixel shifts for a stationary background anchor.
+        """
         dt = 1.0 / fps
         velocities = []
         
-        # Standardize focal_input to a list for zoom-awareness
+        # Standardize focal_input
         if isinstance(focal_input, (int, float)):
             focal_array = [focal_input] * len(pixel_shifts)
         else:
             focal_array = focal_input
 
-        # 1. Calculate Velocity per segment with dynamic spatial resolution
+        # Default bg_shifts to zero if not provided
+        if bg_shifts is None:
+            bg_shifts = [0.0] * len(pixel_shifts)
+
+        # 1. Calculate Velocity with Parallax Correction
         for i, s in enumerate(pixel_shifts):
             f_current = focal_array[i]
-            # Spatial Resolution: meters per pixel at this specific focal length
             m_per_px = (distance_m * (sensor_w_mm / f_current)) / img_w_px
-            velocities.append((s * m_per_px) / dt)
+            
+            # SUBTRACT camera motion from observed motion
+            true_shift = s - bg_shifts[i]
+            
+            velocities.append((true_shift * m_per_px) / dt)
         
         # 2. Dynamic Noise Floor
-        # We calculate the noise floor based on the current segment's zoom level
         g_forces = [0]
         for i in range(1, len(velocities)):
             f_current = focal_array[i]
             m_per_px = (distance_m * (sensor_w_mm / f_current)) / img_w_px
-            noise_floor_ms = (2.0 * m_per_px) / dt # 2px jitter threshold
+            noise_floor_ms = (2.0 * m_per_px) / dt 
             
             v_delta = abs(velocities[i] - velocities[i-1])
             
