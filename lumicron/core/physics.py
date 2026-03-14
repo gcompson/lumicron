@@ -146,3 +146,102 @@ class VisualTracker:
             pixel_dist = np.sqrt((points[1][0]-points[0][0])**2 + (points[1][1]-points[0][1])**2)
             return pixel_dist, len(frame_files)
         return None
+
+class StackEngine:
+    @staticmethod
+    def generate_streak_map(project_path):
+        frames_dir = os.path.join(project_path, "02_FRAMES")
+        frame_files = sorted([os.path.join(frames_dir, f) for f in os.listdir(frames_dir)])
+        if not frame_files: return None
+
+        first_frame = cv2.imread(frame_files[0])
+        max_intensity = np.zeros_like(first_frame)
+
+        print(f"Stacking {len(frame_files)} frames into a Streak Map...")
+        for i, f_path in enumerate(frame_files):
+            img = cv2.imread(f_path)
+            if img is not None:
+                # Keep the brightest pixel at every coordinate
+                max_intensity = cv2.max(max_intensity, img)
+            
+            if i % 50 == 0:
+                sys.stdout.write(f"\rProgress: {int((i/len(frame_files))*100)}%")
+                sys.stdout.flush()
+
+        stack_path = os.path.join(project_path, "04_REPORTS", "streak_map.png")
+        cv2.imwrite(stack_path, max_intensity)
+        print(f"\nSUCCESS: Streak Map saved to {stack_path}")
+        
+        # Display the result
+        h, w = max_intensity.shape[:2]
+        scale = 1080 / h if h > 1080 else 1.0
+        display = cv2.resize(max_intensity, (int(w*scale), int(h*scale)))
+        cv2.imshow("STREAK MAP - Press any key to close", display)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+        return stack_path
+
+class VisualTracker:
+    @staticmethod
+    def manual_track(project_path, use_mask=False, use_filter=False, start=None, end=None):
+        frames_dir = os.path.join(project_path, "02_FRAMES")
+        frame_files = sorted([os.path.join(frames_dir, f) for f in os.listdir(frames_dir)])
+        
+        # Apply Range
+        s_idx = start if start is not None else 0
+        e_idx = end if end is not None else len(frame_files) - 1
+        target_files = [(s_idx, frame_files[s_idx]), (e_idx, frame_files[e_idx])]
+
+        points = []
+        def click_event(event, x, y, flags, param):
+            if event == cv2.EVENT_LBUTTONDOWN:
+                scale = param['scale']
+                points.append((int(x / scale), int(y / scale)))
+                cv2.circle(param['display'], (x, y), 5, (0, 255, 0), -1)
+                cv2.imshow("Select Object", param['display'])
+
+        for f_num, f_path in target_files:
+            img = cv2.imread(f_path)
+            h, w = img.shape[:2]
+            
+            # Burn in Frame Number for display
+            cv2.putText(img, f"FRAME: {f_num}", (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 255, 255), 3)
+
+            if use_filter:
+                img = cv2.cvtColor(cv2.Canny(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY), 50, 150), cv2.COLOR_GRAY2BGR)
+
+            scale = 1080 / h if h > 1080 else 1.0
+            display_img = cv2.resize(img, (int(w * scale), int(h * scale)))
+            
+            context = {'display': display_img, 'scale': scale}
+            cv2.imshow("Select Object", display_img)
+            cv2.setMouseCallback("Select Object", click_event, context)
+            cv2.waitKey(0)
+
+        cv2.destroyAllWindows()
+        return (np.sqrt((points[1][0]-points[0][0])**2 + (points[1][1]-points[0][1])**2), (e_idx - s_idx)) if len(points) >= 2 else None
+
+class StackEngine:
+    @staticmethod
+    def generate_streak_map(project_path, start=None, end=None):
+        frames_dir = os.path.join(project_path, "02_FRAMES")
+        frame_files = sorted([os.path.join(frames_dir, f) for f in os.listdir(frames_dir)])
+        
+        s_idx = start if start is not None else 0
+        e_idx = end if end is not None else len(frame_files)
+        target_range = frame_files[s_idx:e_idx]
+
+        first_frame = cv2.imread(target_range[0])
+        max_intensity = np.zeros_like(first_frame)
+
+        print(f"Stacking Frames {s_idx} to {e_idx}...")
+        for i, f_path in enumerate(target_range):
+            img = cv2.imread(f_path)
+            if img is not None:
+                max_intensity = cv2.max(max_intensity, img)
+        
+        stack_path = os.path.join(project_path, "04_REPORTS", f"streak_{s_idx}_{e_idx}.png")
+        cv2.imwrite(stack_path, max_intensity)
+        cv2.imshow("STREAK MAP", cv2.resize(max_intensity, (int(max_intensity.shape[1]*0.5), int(max_intensity.shape[0]*0.5))))
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
