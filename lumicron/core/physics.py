@@ -1,9 +1,10 @@
 import numpy as np
 import cv2
 import os
+from tqdm import tqdm
 import pandas as pd
 import matplotlib.pyplot as plt
-from scipy.fftpack import fft
+from scipy.fftpack import fft, fftfreq
 from concurrent.futures import ThreadPoolExecutor
 
 class KinematicsEngine:
@@ -88,6 +89,32 @@ class RadiometricEngine:
         return results
 
     @staticmethod
+    def analyze_beat_frequency(project_path, fps=240): # Force 240 here
+        data_path = os.path.join(project_path, "03_DATA", "smear_audit.csv")
+        df = pd.read_csv(data_path)
+        
+        y = df['mean_luminance'].values
+        
+        # 1. DETREND: This kills the 0.02 Hz 'drift' caused by clouds/motion
+        from scipy.signal import detrend
+        y_clean = detrend(y)
+        
+        N = len(y_clean)
+        T = 1.0 / fps # This now uses the real 240ms timing
+        yf = np.abs(fft(y_clean))
+        xf = fftfreq(N, T)[:N//2]
+        
+        # 2. FILTER: Ignore everything below 2Hz (Atmospheric noise)
+        valid_indices = np.where(xf > 2.0)[0]
+        if len(valid_indices) == 0: return 0.0
+        
+        peak_idx = valid_indices[np.argmax(yf[valid_indices])]
+        beat_hz = abs(xf[peak_idx])
+        
+        print(f"Propulsion Signature Identified: {beat_hz:.2f} Hz")
+        return round(beat_hz, 2)
+
+    @staticmethod
     def generate_plots(project_path):
         """Generates the frequency and pulse charts for the report."""
         data_path = os.path.join(project_path, "03_DATA", "smear_audit.csv")
@@ -96,7 +123,7 @@ class RadiometricEngine:
         df = pd.read_csv(data_path)
         y = df['mean_luminance'].values
         
-        # Pulse Audit (Time Domain)
+        # Pulse Audit (Time Domain)i
         plt.figure(figsize=(12, 5))
         plt.plot(df['frame'], y, color='#00ffcc', linewidth=1)
         plt.title('LUMICRON: Radiometric Pulse Audit')
@@ -188,17 +215,34 @@ class StackEngine:
     @staticmethod
     def generate_streak_map(project_path, start=None, end=None):
         frames_dir = os.path.join(project_path, "02_FRAMES")
-        files = sorted([os.path.join(frames_dir, f) for f in os.listdir(frames_dir)])
-        s_idx, e_idx = (start or 0), (end or len(files)-1)
+        files = sorted([os.path.join(frames_dir, f) for f in os.listdir(frames_dir) if f.endswith('.png')])
+        
+        if not files:
+            print("Error: No frames found in 02_FRAMES.")
+            return None
+
+        # Logic safety: Ensure we don't exceed the list bounds
+        s_idx = max(0, start) if start is not None else 0
+        e_idx = min(len(files)-1, end) if end is not None else len(files)-1
         
         first = cv2.imread(files[s_idx])
+        if first is None:
+            print(f"Error: Could not read frame at index {s_idx}")
+            return None
+            
         mip = np.zeros_like(first)
-        for f in files[s_idx:e_idx+1]:
-            img = cv2.imread(f)
-            if img is not None: mip = cv2.max(mip, img)
         
-        cv2.imwrite(os.path.join(project_path, "03_DATA", "streak_map.png"), mip)
-        print("✅ Streak Map saved.")
+        # Performance progress bar for the M4 Pro
+        for f in tqdm(files[s_idx:e_idx+1], desc="Stacking Frames", unit="frame"):
+            img = cv2.imread(f)
+            if img is not None: 
+                mip = cv2.max(mip, img)
+        
+        output_path = os.path.join(project_path, "03_DATA", "streak_map.png")
+        cv2.imwrite(output_path, mip)
+        
+        print(f"✅ Streak Map saved to {output_path}")
+        return output_path # This is the crucial return for the CLI
 
 class ArtifactEngine:
     @staticmethod
