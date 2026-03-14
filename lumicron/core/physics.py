@@ -8,24 +8,33 @@ from concurrent.futures import ThreadPoolExecutor
 
 class KinematicsEngine:
     @staticmethod
-    def calculate_telemetry(pixel_shifts, distance_m, focal_mm, sensor_w_mm, img_w_px, fps):
-        # 1. Calculate Spatial Resolution
-        fov_m = distance_m * (sensor_w_mm / focal_mm)
-        m_per_px = fov_m / img_w_px
+    def calculate_telemetry(pixel_shifts, distance_m, focal_input, sensor_w_mm, img_w_px, fps):
         dt = 1.0 / fps
+        velocities = []
         
-        # 2. Velocity Calculation (m/s)
-        velocities = [(s * m_per_px) / dt for s in pixel_shifts]
+        # Standardize focal_input to a list for zoom-awareness
+        if isinstance(focal_input, (int, float)):
+            focal_array = [focal_input] * len(pixel_shifts)
+        else:
+            focal_array = focal_input
+
+        # 1. Calculate Velocity per segment with dynamic spatial resolution
+        for i, s in enumerate(pixel_shifts):
+            f_current = focal_array[i]
+            # Spatial Resolution: meters per pixel at this specific focal length
+            m_per_px = (distance_m * (sensor_w_mm / f_current)) / img_w_px
+            velocities.append((s * m_per_px) / dt)
         
-        # 3. Slow-UAP Logic: Establish Noise Floor
-        # If the pixel shift is less than 2px, it might be human clicking error
-        noise_floor_ms = (2.0 * m_per_px) / dt
-        
+        # 2. Dynamic Noise Floor
+        # We calculate the noise floor based on the current segment's zoom level
         g_forces = [0]
         for i in range(1, len(velocities)):
+            f_current = focal_array[i]
+            m_per_px = (distance_m * (sensor_w_mm / f_current)) / img_w_px
+            noise_floor_ms = (2.0 * m_per_px) / dt # 2px jitter threshold
+            
             v_delta = abs(velocities[i] - velocities[i-1])
             
-            # If the change is smaller than our noise floor, ignore the G-spike
             if v_delta < noise_floor_ms:
                 g_forces.append(0.0)
                 continue
@@ -36,7 +45,7 @@ class KinematicsEngine:
         top_speed = max(velocities) if velocities else 0
         max_g = max(g_forces) if g_forces else 0
         
-        # 4. Scenario Classification
+        # 3. Scenario Classification
         status = "ANOMALOUS" if max_g > 50 or top_speed > 1000 else "CONVENTIONAL"
         if top_speed < 50 and max_g < 2:
             status = "SLOW_STABLE (Possible Drone/Bird)"
