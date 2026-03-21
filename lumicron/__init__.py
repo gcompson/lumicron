@@ -36,6 +36,38 @@ def get_video_metadata(file_path):
     except Exception:
         return {"duration": 0, "fps": 240.0}
 
+def generate_review_video(source_path, project_path, start=None, duration=None, debug=False):
+    """
+    MISSION CRITICAL: Burns frame numbers into a review copy.
+    Optimized for iPhone 16 (1080p @ 240fps capture).
+    """
+    output_path = os.path.join(project_path, "03_DATA", "review_telemetry.mp4")
+    
+    # Forensic Standards: Yellow text, Courier New (Monospace), Black Box
+    # fontsize=35 is optimized for 1080p legibility.
+    drawtext_filter = (
+        "drawtext=fontfile=/System/Library/Fonts/Supplemental/Courier\\ New.tty: "
+        "text='FRAME\\: %{frame_num}': start_number=0: x=(w-tw)/2: y=h-(2*lh): "
+        "fontcolor=yellow: fontsize=35: box=1: boxcolor=black@0.4"
+    )
+
+    # REPAIR: Ensure the review video matches the extracted frame window
+    cmd = ['ffmpeg', '-y']
+    if start: cmd.extend(['-ss', start])
+    if duration: cmd.extend(['-t', duration])
+    
+    cmd.extend([
+        '-i', source_path,
+        '-vf', drawtext_filter,
+        '-c:v', 'libx264', '-crf', '18', '-preset', 'veryfast',
+        output_path
+    ])
+
+    if debug: print(f"Executing Burn-In: {' '.join(cmd)}")
+    print(f"Progress: Generating Review Telemetry (1080p/240fps)...")
+    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+    print(f"✅ Review video locked: {output_path}")
+
 def main():
     # HARDWARE HANDSHAKE: Optimized for Mac Mini M4 Pro
     cv2.ocl.setUseOpenCL(True)
@@ -82,7 +114,7 @@ def main():
     rep_p.add_argument("project")
     rep_p.add_argument("--distance", type=float, required=True)
     rep_p.add_argument("--focal", type=float, default=24.0)
-    rep_p.add_argument("--fps", type=float, default=60.0)
+    rep_p.add_argument("--fps", type=float, default=240.0) # Updated for iPhone 16
 
     args = parser.parse_args()
     if not args.command: return
@@ -97,14 +129,23 @@ def main():
         os.makedirs(frame_dir, exist_ok=True)
         os.makedirs(os.path.join(project_path, "03_DATA"), exist_ok=True)
         
-        # FORENSIC STANDARD: vsync 0 to prevent frame dropping on iPhone VFR
+        # 1. RAW EXTRACTION: vsync 0 to prevent frame dropping
         cmd = ['ffmpeg', '-i', args.source, '-vsync', '0', '-q:v', '2']
         if args.start: cmd.extend(['-ss', args.start])
         if args.duration: cmd.extend(['-t', args.duration])
-        cmd.append(os.path.join(frame_dir, "%05d.png"))
+        cmd.append(os.path.join(frame_dir, "%05d.png")) # 5-digit padding
         
-        if args.debug: print(f"Executing: {' '.join(cmd)}")
+        if args.debug: print(f"Executing Extraction: {' '.join(cmd)}")
         subprocess.run(cmd)
+
+        # 2. TELEMETRY BURN-IN: Generate Review Video (Corrected Windowing)
+        generate_review_video(
+            args.source, 
+            project_path, 
+            start=args.start, 
+            duration=args.duration, 
+            debug=args.debug
+        )
 
     elif args.command == "radiate":
         RadiometricEngine(project_path).analyze()
@@ -129,7 +170,7 @@ def main():
             use_filter=args.filter
         )
         
-        # LOCK-IN: Ensure tracking data is saved to disk for the report command
+        # LOCK-IN: Ensure tracking data is saved to disk
         if pixel_shifts:
             tracking_file = os.path.join(project_path, "03_DATA", "tracking.json")
             with open(tracking_file, 'w') as f:
