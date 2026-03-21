@@ -8,16 +8,17 @@ setup(
     install_requires=[
         'numpy',
         'scipy',
-        'opencv-python',
-        'pandas',      # Required for smear_audit.csv 
-        'matplotlib',  # Required for light curves 
-        'fpdf2',       # Required for forensic briefs 
-        'tqdm',        # Required for progress bars 
-        'pyyaml',      # Required for config management 
+        'opencv-contrib-python-headless', # Optimized for Apple Silicon / OpenCL
+        'pandas',      
+        'matplotlib',  
+        'fpdf2',       
+        'tqdm',        
+        'pyyaml',      
+        'streamlit',   
     ],
     entry_points={
         'console_scripts': [
-            'lumicron = lumicron:main',
+            'lumicron = lumicron:main', # Points directly to def main() in __init__.py
         ],
     },
     python_requires='>=3.9',

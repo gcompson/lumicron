@@ -1,168 +1,143 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.express as px
 import cv2
 import os
-from scipy.fft import fft, fftfreq
-from scipy.signal import iirnotch, lfilter
-from lumicron.core.physics import RadiometricEngine, KinematicsEngine
-from lumicron.core.image_proc import ImageProcessor
+import json
+import plotly.express as px
 
-st.set_page_config(page_title="LUMICRON Forensic Cockpit", layout="wide")
+# --- 1. CORE CONFIGURATION ---
+st.set_page_config(page_title="LUMICRON v4.4 | Forensic Master", layout="wide", initial_sidebar_state="expanded")
 
-# Lab Aesthetics
-st.markdown("""
-    <style>
-    .main { background-color: #0e1117; color: #c9d1d9; }
-    .metric-card { 
-        background-color: #161b22; padding: 20px; 
-        border-radius: 10px; border: 1px solid #30363d;
-        margin-bottom: 20px;
-    }
-    .stTabs [data-baseweb="tab-list"] { gap: 24px; }
-    .stTabs [data-baseweb="tab"] { 
-        height: 50px; 
-        white-space: pre-wrap; 
-        background-color: #161b22; 
-        border-radius: 5px 5px 0px 0px; 
-        padding: 10px 20px; 
-        font-weight: 600;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
-st.title("🛸 LUMICRON: Unified Forensic Dashboard v4.2")
-st.write("Hardware Acceleration: **M4 Pro / OpenCL Engine Active**")
-
-# --- SIDEBAR: MISSION CONTROL ---
-st.sidebar.header("1. Global Constants")
-default_path = os.path.join(os.path.expanduser("~"), "Projects/UAP_Data/Target_B")
-project_path = st.sidebar.text_input("Active Project Folder", default_path)
-fps = st.sidebar.number_input("Capture Rate (FPS)", value=240)
-dist_m = st.sidebar.number_input("Target Distance (m)", value=1200)
-
-st.sidebar.header("2. Signal Tuning")
-apply_clahe = st.sidebar.checkbox("Signal CLAHE (Contrast Stretch)", value=True)
-apply_notch = st.sidebar.checkbox("60Hz Notch Filter (Anti-Aliasing)", value=True)
-
-st.sidebar.header("3. Spatial Controls")
-threshold = st.sidebar.slider("Luma Isolation Threshold", 0, 255, 210)
-decay = st.sidebar.slider("Persistence Decay (Blend)", 0.0, 1.0, 0.6)
-zoom_frame = st.sidebar.number_input("Dilation Center Frame", value=3000)
-
-# --- DATA PROCESSING ---
-data_path = os.path.join(project_path, "03_DATA", "smear_audit.csv")
-
-if os.path.exists(data_path):
-    df = pd.read_csv(data_path)
+# --- 2. SIDEBAR & GLOBAL CONTROLS ---
+with st.sidebar:
+    st.title("🛸 LUMICRON")
+    st.caption("Forensic Cockpit v4.4")
     
-    # Defensive drop to prevent NaNs from crashing Plotly
-    df = df.dropna(subset=['peak_luminance', 'mean_luminance'])
+    home = os.path.expanduser("~")
+    base_path = os.path.join(home, "Projects/UAP_Data")
     
-    # 1. Radiometric Energy (Dynamic Baseline Subtraction)
-    # We use a rolling mean to calculate the ambient sky brightness
-    df['ambient_sky'] = df['mean_luminance'].rolling(window=10, min_periods=1).mean()
-    
-    # Isolate only the positive transient spikes (the craft pulsing above ambient)
-    df['transient_spike'] = (df['mean_luminance'] - df['ambient_sky']).clip(lower=0)
-    
-    # Calculate the area of illumination based ONLY on the isolated energy spikes
-    df['energy_output'] = (df['transient_spike'] / 255) * (dist_m**2)
-
-    # 2. Signal Clean-up
-    y = df['mean_luminance'].values
-    if apply_clahe and len(y) > 0:
-        y_min, y_max = np.min(y), np.max(y)
-        if y_max > y_min:
-            y = (y - y_min) / (y_max - y_min)
-            
-    y_detrended = y - np.mean(y) if len(y) > 0 else y
-
-    if apply_notch and len(y_detrended) > 0:
-        b, a = iirnotch(60.0, 30, fs=fps)
-        y_detrended = lfilter(b, a, y_detrended)
-
-    # 3. FFT Calculation
-    N = len(y_detrended)
-    if N > 0:
-        xf = fftfreq(N, 1/fps)[:N//2]
-        yf = np.abs(fft(y_detrended))[:N//2]
-        psd_df = pd.DataFrame({'Hz': xf, 'Amplitude': 2.0/N * yf})
+    if os.path.exists(base_path):
+        projects = sorted([d for d in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, d))])
+        current_p = st.session_state.get('active_project', projects[0])
+        selected_project = st.selectbox("Active Target Dossier", projects, index=projects.index(current_p) if current_p in projects else 0)
+        st.session_state.active_project = selected_project
     else:
-        psd_df = pd.DataFrame({'Hz': [], 'Amplitude': []})
-
-    # --- TABBED INTERFACE ---
-    tab1, tab2, tab3 = st.tabs(["⚡ Radiometrics", "🌊 Spectral", "🔬 Spatial"])
-
-    # === TAB 1: RADIOMETRICS ===
-    with tab1:
-        st.subheader("Luminous Flux (Energy Spikes over Time)")
-        if not df.empty:
-            fig_luma = px.area(df, x='frame', y='energy_output', template="plotly_dark", color_discrete_sequence=['#ffcc00'])
-            fig_luma.update_layout(yaxis_title="Estimated Radiance (m²)")
-            # UPDATED: width='stretch'
-            st.plotly_chart(fig_luma, width='stretch')
-            
-            peak_energy = float(df['energy_output'].max())
-            radius = float(np.sqrt(peak_energy)) if peak_energy > 0 else 0.0
-            
-            summary_html = str(f"""
-            <div class="metric-card">
-                <h3 style='color: #ffcc00;'>Peak Radiance Event: {peak_energy:.2f} m²</h3>
-                <p>At a distance of {dist_m}m, the craft's energy spike is capable of illuminating a {radius:.1f}m radius. 
-                This massive energy dump corresponds with the primary translation pulses.</p>
-            </div>
-            """)
-            st.markdown(summary_html, unsafe_allow_html=True)
-
-    # === TAB 2: SPECTRAL ===
-    with tab2:
-        st.subheader("Frequency Domain (Propulsion Signature)")
-        if not psd_df.empty:
-            fig_fft = px.line(psd_df[(psd_df['Hz'] > 2) & (psd_df['Hz'] < 20)], x='Hz', y='Amplitude', template="plotly_dark", color_discrete_sequence=['#ff0055'])
-            # UPDATED: width='stretch'
-            st.plotly_chart(fig_fft, width='stretch')
-
-            peaks_only = psd_df[(psd_df['Hz'] > 2) & (psd_df['Hz'] < 10)]
-            peak_hz = float(peaks_only.iloc[peaks_only['Amplitude'].idxmax()]['Hz']) if not peaks_only.empty else 0.0
-
-            st.markdown("### Multi-Target Correlation")
-            col_a, col_b = st.columns(2)
-            with col_a:
-                st.metric("Target B (Active)", f"{peak_hz:.2f} Hz", delta="Mach 321")
-                st.write("**Status:** Anomalous Harmonic Confirmed.")
-            with col_b:
-                st.metric("Target A (Reference)", "13.11 Hz", delta="Mach 237")
-                st.write("**Correlation:** Inverse Frequency-to-Velocity Scaling. The faster the craft moves, the slower and more powerful the displacement cycle becomes.")
-
-    # === TAB 3: SPATIAL ===
-    with tab3:
-        st.subheader("Temporal Persistence Mapping")
-        streak_path = os.path.join(project_path, "03_DATA", "streak_map.png")
-        if os.path.exists(streak_path):
-            raw_img = cv2.imread(streak_path)
-            gray = cv2.cvtColor(raw_img, cv2.COLOR_BGR2GRAY)
-            _, mask = cv2.threshold(gray, threshold, 255, cv2.THRESH_BINARY)
-            
-            color_mapped = cv2.applyColorMap(gray, cv2.COLORMAP_JET)
-            display_img = cv2.addWeighted(raw_img, 1-decay, color_mapped, decay, 0)
-            display_img = cv2.bitwise_and(display_img, display_img, mask=mask)
-            # UPDATED: width='stretch'
-            st.image(display_img, caption=f"Mach 321 Comet Trail (Blend Decay: {decay})", width='stretch')
+        st.error("Data root not found.")
+        st.stop()
         
-        st.subheader("Sub-Pixel Temporal Dilation")
-        frame_name = f"frame_{int(zoom_frame):05d}.png"
-        frame_path = os.path.join(project_path, "02_FRAMES", frame_name)
-        
-        if os.path.exists(frame_path):
-            z_img = cv2.imread(frame_path)
-            h, w = z_img.shape[:2]
-            crop = z_img[h//3:2*h//3, w//3:2*w//3]
-            # UPDATED: width='stretch'
-            st.image(crop, caption=f"Micro-Transient Zoom: Frame {zoom_frame}", width='stretch')
-        else:
-            st.info(f"Frame {zoom_frame} not found in 02_FRAMES. Adjust the 'Dilation Center Frame' slider.")
+    st.divider()
+    if st.button("🔄 PURGE CACHE"):
+        st.cache_data.clear()
+        st.rerun()
 
+# --- 3. DATA INGESTION ---
+project_path = os.path.join(base_path, selected_project)
+data_dir = os.path.join(project_path, "03_DATA")
+# Logic: Use Stabilized frames if they exist, otherwise raw
+stab_dir = os.path.join(project_path, "02_STABILIZED")
+raw_dir = os.path.join(project_path, "02_FRAMES")
+frames_dir = stab_dir if os.path.exists(stab_dir) and len(os.listdir(stab_dir)) > 0 else raw_dir
+
+smear_data = pd.read_csv(os.path.join(data_dir, "smear_audit.csv")) if os.path.exists(os.path.join(data_dir, "smear_audit.csv")) else None
+morph_data = json.load(open(os.path.join(data_dir, "morphology.json"))) if os.path.exists(os.path.join(data_dir, "morphology.json")) else {}
+track_data = json.load(open(os.path.join(data_dir, "tracking.json"))) if os.path.exists(os.path.join(data_dir, "tracking.json")) else {}
+
+files = sorted([f for f in os.listdir(frames_dir) if f.endswith('.png')])
+frames_count = len(files)
+
+# --- 4. HUD METRICS ---
+st.markdown(f"### 🛸 TARGET: `{selected_project}`")
+if frames_dir == stab_dir:
+    st.caption("🟢 ECC REGISTRATION ACTIVE (Stabilized Ground)")
+
+col1, col2, col3, col4 = st.columns(4)
+with col1:
+    v = smear_data['delta_flux'].max() if smear_data is not None and 'delta_flux' in smear_data.columns else "N/A"
+    st.metric("Peak Delta Flux", f"{v:.2f}" if isinstance(v, (float, int)) else v)
+with col2:
+    s = morph_data.get('ssi', 'N/A')
+    st.metric("SSI (Rigidity)", f"{s:.2f}" if isinstance(s, (float, int)) else s)
+with col3:
+    g = track_data.get('max_g', 'N/A')
+    st.metric("Kinematics", f"{g} G" if g != "N/A" else "Pending")
+with col4:
+    st.metric("Timeline Depth", f"{frames_count} Frames")
+
+st.divider()
+
+# --- 5. MASTER TIMELINE SYNC ---
+if frames_count > 0:
+    # Auto-find the peak event
+    auto_f = 1
+    if smear_data is not None and 'delta_flux' in smear_data.columns:
+        auto_f = int(smear_data.iloc[smear_data['delta_flux'].idxmax()]['frame'])
+
+    c_s1, c_s2 = st.columns([4, 1])
+    with c_s2: use_peak = st.toggle("Sync to Peak Event", value=True if selected_project == "Target_C" else False)
+    with c_s1:
+        f_display = st.slider("Master Temporal Sync", 1, frames_count, value=auto_f if use_peak else 1)
+        f_idx = f_display - 1 # 0-based index for cv2
 else:
-    st.error("Missing data. Run 'lumicron radiate Target_B' in the CLI first.")
+    st.stop()
+
+# --- 6. WORKSPACE TABS ---
+tab_rad, tab_spatial, tab_persist = st.tabs(["📈 Telemetry", "🔍 Spatial Matrix", "☄️ Persistence"])
+
+with tab_rad:
+    if smear_data is not None:
+        # Safe column check to prevent Target_B crashes
+        cols = [c for c in ['delta_flux', 'luma'] if c in smear_data.columns]
+        fig = px.line(smear_data, x="frame", y=cols, title="Baseline-Subtracted Radiometry")
+        fig.update_layout(template="plotly_dark", margin=dict(l=0, r=0, t=20, b=0), height=400)
+        fig.add_vline(x=f_display, line_width=3, line_color="#FF00CC", annotation_text=f"F{f_display}")
+        st.plotly_chart(fig, config={'displayModeBar': False, 'responsive': True})
+
+with tab_spatial:
+    with st.expander("🛠️ Enhancement Suite", expanded=True):
+        e1, e2, e3, e4 = st.columns(4)
+        clahe_on = e1.checkbox("Contrast Stretching (CLAHE)", value=True)
+        zoom_on = e2.checkbox("4x Dilation Zoom", value=False)
+        lookback = e3.slider("Lookback (Delta)", 1, 30, 5)
+        noise_floor = e4.slider("Noise Floor", 0, 50, 15)
+
+    col_l, col_r = st.columns(2)
+    img = cv2.imread(os.path.join(frames_dir, files[f_idx]))
+    ref_img = cv2.imread(os.path.join(frames_dir, files[max(0, f_idx - lookback)]))
+
+    if img is not None:
+        # 1. Visual Spectrum (Left)
+        l_view = img.copy()
+        if clahe_on:
+            lab = cv2.cvtColor(l_view, cv2.COLOR_BGR2LAB)
+            l, a, b = cv2.split(lab)
+            l = cv2.createCLAHE(clipLimit=2.0).apply(l)
+            l_view = cv2.cvtColor(cv2.merge((l,a,b)), cv2.COLOR_LAB2BGR)
+        
+        # 2. Illumination Delta (Right)
+        if ref_img is not None:
+            # We use absdiff and a threshold to kill sensor pixel-crawl
+            diff = cv2.absdiff(img, ref_img)
+            _, diff = cv2.threshold(diff, noise_floor, 255, cv2.THRESH_TOZERO)
+            r_view = cv2.applyColorMap(cv2.convertScaleAbs(diff, alpha=8.0), cv2.COLORMAP_MAGMA)
+        else:
+            r_view = np.zeros_like(img)
+
+        if zoom_on:
+            for i, frame in enumerate([l_view, r_view]):
+                h, w = frame.shape[:2]
+                box = 200
+                cropped = frame[h//2-box:h//2+box, w//2-box:w//2+box]
+                resized = cv2.resize(cropped, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
+                if i == 0: l_view = resized
+                else: r_view = resized
+
+        col_l.image(cv2.cvtColor(l_view, cv2.COLOR_BGR2RGB), width="stretch", caption=f"Visual F{f_display}")
+        col_r.image(cv2.cvtColor(r_view, cv2.COLOR_BGR2RGB), width="stretch", caption="BSD Delta (Magma)")
+
+with tab_persist:
+    streak_path = os.path.join(data_dir, "streak_map.png")
+    if os.path.exists(streak_path):
+        st.image(streak_path, width="stretch", caption="Streak Map Persistence")
+    else:
+        st.info("Run 'lumicron stack Target_C --mode diff' to visualize path.")

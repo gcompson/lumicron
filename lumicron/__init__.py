@@ -4,194 +4,148 @@ import subprocess
 import sys
 import json
 import re
-import yaml
+import shutil
 import cv2
-from datetime import datetime
 from tqdm import tqdm
+
+# LOCKED-IN: Forensic Engine Imports
 from .core.physics import (
-    KinematicsEngine, RadiometricEngine, MorphologicalEngine, 
-    ArtifactEngine, VisualTracker, StackEngine
+    KinematicsEngine, 
+    RadiometricEngine, 
+    MorphologicalEngine, 
+    ArtifactEngine, 
+    VisualTracker, 
+    StackEngine
 )
-# New forensic image processing module
-from .core.image_proc import ImageProcessor 
+from .core.stabilize import stabilize_project
 
 def get_video_metadata(file_path):
-    """Sniffs video metadata using ffprobe for auto-population."""
+    """Audits source video to ensure temporal resolution matches project specs."""
     cmd = ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", file_path]
     try:
         result = subprocess.check_output(cmd).decode('utf-8')
         data = json.loads(result)
-        tags = data.get('format', {}).get('tags', {})
-        return {
-            "location": tags.get('com.apple.quicktime.location.ISO6709', "Unknown"),
-            "make": tags.get('com.apple.quicktime.make', "Unknown"),
-            "model": tags.get('com.apple.quicktime.model', "Unknown")
-        }
+        duration = float(data.get('format', {}).get('duration', 0))
+        fps_str = data['streams'][0].get('avg_frame_rate', "0/0")
+        if '/' in fps_str:
+            num, den = map(int, fps_str.split('/'))
+            fps = num / den if den > 0 else 240.0
+        else:
+            fps = float(fps_str) if fps_str != "0" else 240.0
+        return {"duration": duration, "fps": fps}
     except Exception:
-        return {}
+        return {"duration": 0, "fps": 240.0}
 
 def main():
-    # Robust GPU Handshake for M4 Pro and Intel/eGPU setups
+    # HARDWARE HANDSHAKE: Optimized for Mac Mini M4 Pro
     cv2.ocl.setUseOpenCL(True)
-    gpu_name = "CPU (Fall-back)"
-    for i in range(5):
-        try:
-            dev = cv2.ocl.Device_getDevice(i)
-            if any(x in dev.name() for x in ["AMD", "Radeon", "Apple", "M4"]):
-                cv2.ocl.Device.setDefault(dev)
-                gpu_name = dev.name()
-                break
-        except Exception:
-            break
-
-    parser = argparse.ArgumentParser(description="LUMICRON: Forensic UAP Suite")
+    
+    parser = argparse.ArgumentParser(description="LUMICRON: UAP Forensic Analysis Engine")
+    parser.add_argument("--debug", action="store_true", help="Verbose hardware and logic logs")
     subparsers = parser.add_subparsers(dest="command")
 
-    # 1. INIT
-    init_p = subparsers.add_parser('init', help='Initialize project and extract frames')
-    init_p.add_argument('project')
-    init_p.add_argument('--source', required=True)
-    init_p.add_argument('--auto', action='store_true', help='Auto-detect metadata')
-    init_p.add_argument('--start_time', help='Start (HH:MM:SS)')
-    init_p.add_argument('--duration', help='Duration in seconds')
+    # --- INIT: Folder Prep & Frame Extraction ---
+    init_p = subparsers.add_parser("init")
+    init_p.add_argument("project")
+    init_p.add_argument("--source", required=True)
+    init_p.add_argument("--fps", type=float)
+    init_p.add_argument("--start")
+    init_p.add_argument("--duration")
 
-    # 2. ANALYSIS
-    subparsers.add_parser('radiate', help='Luminance/FFT analysis').add_argument('project')
-    subparsers.add_parser('morph', help='Shape/Rigidity analysis').add_argument('project')
-    subparsers.add_parser('noise', help='Sensor artifact audit').add_argument('project')
-    
-    # 3. VISUALIZATION & STACKING
-    stack_p = subparsers.add_parser('stack', help='Generate Streak Map')
-    stack_p.add_argument('project')
-    stack_p.add_argument('--start', type=int, default=None)
-    stack_p.add_argument('--end', type=int, default=None)
-    # New "Switches" for visual enhancement
-    stack_p.add_argument('--enhance', action='store_true', help='Apply CLAHE contrast stretching')
-    stack_p.add_argument('--false_color', action='store_true', help='Apply heatmap to visualize intensity')
-    stack_p.add_argument('--isolate', action='store_true', help='Black out sky to isolate the streak')
-    stack_p.add_argument('--threshold', type=int, default=210, help='Brightness threshold (0-255)')
+    # --- RADIATE: Energy Signature & Luma Analysis ---
+    rad_p = subparsers.add_parser("radiate")
+    rad_p.add_argument("project")
 
-    vis_p = subparsers.add_parser('visualize', help='Manual point-tracking')
-    vis_p.add_argument('project')
-    vis_p.add_argument('--start', type=int, default=None)
-    vis_p.add_argument('--end', type=int, default=None)
+    # --- STACK: Persistence / Streak Mapping ---
+    stack_p = subparsers.add_parser("stack")
+    stack_p.add_argument("project")
+    stack_p.add_argument("--mode", choices=['max', 'min', 'diff'], default='max')
 
-    # 4. REPORT
-    report_p = subparsers.add_parser('report', help='Generate forensic dossier')
-    report_p.add_argument('project')
-    report_p.add_argument('--fps', type=int, default=240)
-    report_p.add_argument('--distance', type=float, default=5000.0)
-    report_p.add_argument('--focal', type=float, default=24.0)
+    # --- STABILIZE: ECC Registration ---
+    subparsers.add_parser("stabilize").add_argument("project")
+
+    # --- MORPH: Shape Stability Index (SSI) ---
+    subparsers.add_parser("morph").add_argument("project")
+
+    # --- NOISE: Sensor Artifact Audit ---
+    subparsers.add_parser("noise").add_argument("project")
+
+    # --- VISUALIZE: Manual Point-Tracking ---
+    vis_p = subparsers.add_parser("visualize")
+    vis_p.add_argument("project")
+    vis_p.add_argument("--anchor", action="store_true")
+    vis_p.add_argument("--mask", action="store_true")
+    vis_p.add_argument("--filter", action="store_true")
+
+    # --- REPORT: Forensic Dossier Generation ---
+    rep_p = subparsers.add_parser("report")
+    rep_p.add_argument("project")
+    rep_p.add_argument("--distance", type=float, required=True)
+    rep_p.add_argument("--focal", type=float, default=24.0)
+    rep_p.add_argument("--fps", type=float, default=60.0)
 
     args = parser.parse_args()
-    if not args.command:
-        return
+    if not args.command: return
 
-    project_path = os.path.abspath(args.project)
+    # DATA PERSISTENCE: Standardize Project Root
+    home = os.path.expanduser("~")
+    project_path = os.path.join(home, "Projects/UAP_Data", args.project)
 
+    # --- EXECUTION LOGIC ---
     if args.command == "init":
-        # ... (Existing init logic preserved)
-        for f in ["01_RAW", "02_FRAMES", "03_DATA", "04_REPORTS"]:
-            os.makedirs(os.path.join(project_path, f), exist_ok=True)
+        frame_dir = os.path.join(project_path, "02_FRAMES")
+        os.makedirs(frame_dir, exist_ok=True)
+        os.makedirs(os.path.join(project_path, "03_DATA"), exist_ok=True)
         
-        dest = os.path.join(project_path, "01_RAW", os.path.basename(args.source))
-        if not os.path.exists(dest):
-            subprocess.run(["cp", args.source, dest])
+        # FORENSIC STANDARD: vsync 0 to prevent frame dropping on iPhone VFR
+        cmd = ['ffmpeg', '-i', args.source, '-vsync', '0', '-q:v', '2']
+        if args.start: cmd.extend(['-ss', args.start])
+        if args.duration: cmd.extend(['-t', args.duration])
+        cmd.append(os.path.join(frame_dir, "%05d.png"))
         
-        manifest = {"project_id": os.path.basename(project_path), "sensor": {"fps": 240, "type": "iPhone 16 Pro"}}
-        if args.auto:
-            meta = get_video_metadata(args.source)
-            manifest["location"] = meta.get("location", "Hamilton, VIC")
-            manifest["sensor"]["type"] = f"{meta.get('make', 'Apple')} {meta.get('model', 'iPhone')}"
-        
-        with open(os.path.join(project_path, "lumicron.yaml"), 'w') as f:
-            yaml.dump(manifest, f)
-
-        extract_cmd = ["ffmpeg", "-y", "-i", dest]
-        if args.start_time: extract_cmd.extend(["-ss", args.start_time])
-        if args.duration: extract_cmd.extend(["-t", args.duration])
-        extract_cmd.extend(["-vsync", "0", "-q:v", "2", "-progress", "pipe:1", os.path.join(project_path, "02_FRAMES", "frame_%05d.png")])
-        
-        print(f"Extracting frames on: {gpu_name}")
-        subprocess.run(extract_cmd)
+        if args.debug: print(f"Executing: {' '.join(cmd)}")
+        subprocess.run(cmd)
 
     elif args.command == "radiate":
-        # 1. Generate the raw luminance data (The CSV)
-        RadiometricEngine.analyze_luminance(project_path)
-        
-        # 2. Run the FFT to find the "Beat" (The Evidence)
-        # fps is usually 240 for these iPhone captures
-        beat_hz = RadiometricEngine.analyze_beat_frequency(project_path, fps=240)
-        
-        # 3. Generate the visual plots (The Reports)
-        RadiometricEngine.generate_plots(project_path)
-        
-        print(f"\nFORENSIC ANALYSIS COMPLETE")
-        print(f"Propulsion Signature: {beat_hz} Hz")
-
-    elif args.command == "morph":
-        MorphologicalEngine.analyze_shape_stability(project_path)
-
-    elif args.command == "noise":
-        ArtifactEngine.detect_noise_signature(project_path)
+        RadiometricEngine(project_path).analyze()
 
     elif args.command == "stack":
-        streak_map_path = StackEngine.generate_streak_map(project_path, args.start, args.end)
-        
-        if any([args.enhance, args.false_color, args.isolate]):
-            img = cv2.imread(streak_map_path)
-            if args.enhance:
-                img = ImageProcessor.stretch_contrast(img)
-            if args.isolate:
-                # Using the surgical switch we defined in image_proc.py
-                img = ImageProcessor.apply_binary_isolation(img, args.threshold)
-            if args.false_color:
-                img = ImageProcessor.apply_false_color(img)
-            
-            output_path = streak_map_path.replace(".png", "_ANALYTIC.png")
-            cv2.imwrite(output_path, img)
-            print(f"Processed streak map saved: {output_path}")
+        StackEngine(project_path).generate(mode=args.mode)
+
+    elif args.command == "stabilize":
+        stabilize_project(project_path)
+
+    elif args.command == "morph":
+        MorphologicalEngine(project_path).analyze()
+
+    elif args.command == "noise":
+        ArtifactEngine(project_path).audit()
 
     elif args.command == "visualize":
-        data = VisualTracker.manual_track(project_path, False, False, args.start, args.end)
-        if data:
-            shifts, f_delta = data
-            t_path = os.path.join(project_path, "03_DATA", "tracking.json")
-            # We'll need to manually add bg_shifts to this JSON if using an anchor for now
-            with open(t_path, 'w') as f:
-                json.dump({"pixel_shifts": shifts, "frame_delta": f_delta}, f)
-            print(f"SUCCESS: Tracking saved. Segments: {len(shifts)}")
-
-    elif args.command == "report":
-        t_path = os.path.join(project_path, "03_DATA", "tracking.json")
-        if not os.path.exists(t_path):
-            print("Error: No tracking data found.")
-            return
-
-        with open(t_path, 'r') as f:
-            t_data = json.load(f)
-        
-        # Pull bg_shifts if they exist in the JSON, else None
-        bg_s = t_data.get('bg_shifts', None)
-        
-        kin = KinematicsEngine.calculate_telemetry(
-            t_data['pixel_shifts'], 
-            args.distance, 
-            args.focal, 
-            36.0, # Sensor Width
-            3840, # Pixel Width
-            args.fps,
-            bg_shifts=bg_s # Pass the anchor data to the engine
+        tracker = VisualTracker(project_path)
+        pixel_shifts, f_delta = tracker.manual_track(
+            use_anchor=args.anchor, 
+            use_mask=args.mask, 
+            use_filter=args.filter
         )
         
-        print("\n" + "="*50)
-        print(f"--- KINEMATIC REPORT: {os.path.basename(project_path)} ---")
-        print("="*50)
-        print(f"Status:      {kin['classification']}")
-        print(f"Top Speed:   {kin['top_speed_ms']} m/s (Approx. Mach {round(kin['top_speed_ms']/343, 1)})")
-        print(f"Max G-Force: {kin['max_g']} Gs")
-        if bg_s: print(f"Parallax:    CORRECTED (Active Anchor)")
-        print("="*50)
+        # LOCK-IN: Ensure tracking data is saved to disk for the report command
+        if pixel_shifts:
+            tracking_file = os.path.join(project_path, "03_DATA", "tracking.json")
+            with open(tracking_file, 'w') as f:
+                json.dump({"pixel_shifts": pixel_shifts, "frame_delta": f_delta}, f, indent=4)
+            print(f"✅ Flight path saved to {tracking_file}")
+
+    elif args.command == "report":
+        # Check for necessary data components
+        t_path = os.path.join(project_path, "03_DATA", "tracking.json")
+        if not os.path.exists(t_path):
+            print(f"❌ ERROR: Missing tracking data. Run 'visualize' for {args.project} first.")
+            return
+
+        engine = KinematicsEngine(project_path)
+        dossier = engine.generate_markdown_dossier(args.distance, args.focal, args.fps)
+        print("\n" + dossier + "\n")
 
 if __name__ == "__main__":
     main()
