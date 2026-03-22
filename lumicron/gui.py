@@ -5,12 +5,15 @@ import PIL.Image, PIL.ImageTk
 import os
 import json
 import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 class BrianDashboard:
     def __init__(self, window, window_title, initial_project_path=None):
         self.window = window
         self.window.title(window_title)
-        self.window.geometry("1600x950")
+        self.window.geometry("1700x1000")
         self.window.configure(bg="#1e1e1e")
 
         # --- FORENSIC CONSTANTS (Hamilton Baseline) ---
@@ -20,6 +23,7 @@ class BrianDashboard:
         
         # State
         self.vid = None
+        self.luma_df = None
         self.current_frame = 0
         self.points = {} # {frame_index: (x, y)}
         self.project_path = initial_project_path
@@ -29,7 +33,7 @@ class BrianDashboard:
 
         self.setup_ui()
         
-        # Bindings
+        # Key Bindings & Listeners
         self.window.bind("<Left>", lambda e: self.step_frame(-1))
         self.window.bind("<Right>", lambda e: self.step_frame(1))
         self.window.bind("<Configure>", self.on_window_resize)
@@ -38,43 +42,52 @@ class BrianDashboard:
             self.load_project_data(self.project_path)
 
     def setup_ui(self):
-        # --- SIDEBAR ---
-        self.sidebar = tk.Frame(self.window, width=320, bg="#252526")
+        # --- SIDEBAR (SIGINT PANE) ---
+        self.sidebar = tk.Frame(self.window, width=350, bg="#252526")
         self.sidebar.pack(side=tk.LEFT, fill=tk.Y)
 
-        tk.Label(self.sidebar, text="LUMICRON v5.9", font=("Courier", 22, "bold"), bg="#252526", fg="fuchsia").pack(pady=20)
+        tk.Label(self.sidebar, text="LUMICRON v6.0", font=("Courier", 22, "bold"), bg="#252526", fg="fuchsia").pack(pady=15)
         
-        # --- PART 3: TEMPORAL DILATION PANE ---
+        # TRANSIENT ZOOM
         tk.Label(self.sidebar, text="TRANSIENT ZOOM (4x)", font=("Arial", 10, "bold"), bg="#252526", fg="#888").pack()
         self.zoom_canvas = tk.Canvas(self.sidebar, width=250, height=250, bg="black", highlightthickness=1, highlightbackground="fuchsia")
-        self.zoom_canvas.pack(pady=10, padx=25)
+        self.zoom_canvas.pack(pady=5, padx=25)
 
-        # --- TELEMETRY ---
+        # --- LIVE GRAPH PANE ---
+        tk.Label(self.sidebar, text="PROPULSION HEARTBEAT (LUMA)", font=("Arial", 10, "bold"), bg="#252526", fg="#888").pack(pady=(10,0))
+        self.fig, self.ax = plt.subplots(figsize=(3.5, 2.5), facecolor='#252526')
+        self.ax.set_facecolor('#1e1e1e')
+        self.ax.tick_params(colors='white', labelsize=8)
+        for spine in self.ax.spines.values(): spine.set_color('#444')
+        self.graph_canvas = FigureCanvasTkAgg(self.fig, master=self.sidebar)
+        self.graph_canvas.get_tk_widget().pack(pady=5, padx=10, fill=tk.X)
+
+        # TELEMETRY LABELS
         self.lbl_mach = tk.Label(self.sidebar, text="MACH: 0.00", font=("Courier", 16), bg="#252526", fg="white")
-        self.lbl_mach.pack(pady=5)
+        self.lbl_mach.pack(pady=2)
         self.lbl_gforce = tk.Label(self.sidebar, text="G-FORCE: 0.0", font=("Courier", 16), bg="#252526", fg="orange")
-        self.lbl_gforce.pack(pady=5)
+        self.lbl_gforce.pack(pady=2)
 
-        # FIXED: Style dictionary no longer contains 'bg' to avoid the TypeError
-        btn_s = {"font": ("Arial", 12, "bold"), "fg": "white", "padx": 20, "pady": 12, "cursor": "hand2"}
+        # macOS High-Contrast Label Buttons (Explicit Styling)
+        btn_s = {"font": ("Arial", 12, "bold"), "fg": "white", "padx": 20, "pady": 10, "cursor": "hand2"}
         
         self.btn_load = tk.Label(self.sidebar, text="LOAD PROJECT", bg="#3e3e3e", **btn_s)
-        self.btn_load.pack(pady=10, fill=tk.X, padx=30)
+        self.btn_load.pack(pady=5, fill=tk.X, padx=40)
         self.btn_load.bind("<Button-1>", lambda e: self.load_project())
-
+        
         self.btn_save = tk.Label(self.sidebar, text="SAVE & EXPORT", bg="#007acc", **btn_s)
-        self.btn_save.pack(pady=10, fill=tk.X, padx=30)
+        self.btn_save.pack(pady=5, fill=tk.X, padx=40)
         self.btn_save.bind("<Button-1>", lambda e: self.save_and_exit())
 
         self.status_lbl = tk.Label(self.sidebar, text="READY", font=("Arial", 10), bg="#252526", fg="#888")
-        self.status_lbl.pack(side=tk.BOTTOM, pady=20)
+        self.status_lbl.pack(side=tk.BOTTOM, pady=10)
 
-        # --- MAIN DISPLAY ---
+        # --- MAIN DISPLAY (LETTERBOXED) ---
         self.display_frame = tk.Frame(self.window, bg="#1e1e1e")
         self.display_frame.pack(side=tk.RIGHT, expand=True, fill=tk.BOTH)
 
         self.canvas = tk.Canvas(self.display_frame, bg="black", highlightthickness=0)
-        self.canvas.pack(expand=True, fill=tk.BOTH, padx=15, pady=15)
+        self.canvas.pack(expand=True, fill=tk.BOTH, padx=10, pady=10)
         
         self.canvas.bind("<Button-1>", self.on_left_click)
         self.canvas.bind("<Button-2>", self.on_right_click)
@@ -83,7 +96,74 @@ class BrianDashboard:
         self.scrub = tk.Scale(self.display_frame, from_=0, to=100, orient=tk.HORIZONTAL, 
                               command=self.on_scrub, bg="#1e1e1e", fg="white", 
                               highlightthickness=0, troughcolor="#333", length=1000)
-        self.scrub.pack(pady=20)
+        self.scrub.pack(pady=15)
+
+    def load_project(self):
+        path = filedialog.askdirectory(initialdir="~/Projects/UAP_Data")
+        if path: self.load_project_data(path)
+
+    def load_project_data(self, path):
+        self.project_path = path
+        # Video Load
+        v_path = os.path.join(path, "03_DATA", "review_telemetry.mp4")
+        if os.path.exists(v_path):
+            self.vid = cv2.VideoCapture(v_path)
+            self.total_frames = int(self.vid.get(cv2.CAP_PROP_FRAME_COUNT))
+            self.scrub.config(to=self.total_frames - 1)
+        
+        # CSV Load (For Graphing)
+        s_path = os.path.join(path, "03_DATA", "smear_audit.csv")
+        if os.path.exists(s_path):
+            self.luma_df = pd.read_csv(s_path)
+        
+        self.render_frame()
+        self.status_lbl.config(text=f"ACTIVE: {os.path.basename(path)}", fg="lime")
+
+    def update_graph(self):
+        if self.luma_df is not None:
+            self.ax.clear()
+            frames = self.luma_df['frame'].values
+            luma = self.luma_df['luma'].values
+            
+            self.ax.plot(frames, luma, color='fuchsia', linewidth=1, alpha=0.8)
+            self.ax.axvline(x=self.current_frame, color='white', linestyle='--', linewidth=1)
+            
+            self.ax.set_title(f"Luma Pulse Train", color='white', fontsize=10)
+            self.ax.set_facecolor('#1e1e1e')
+            self.graph_canvas.draw()
+
+    def render_frame(self):
+        if self.vid:
+            self.vid.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
+            ret, frame = self.vid.read()
+            if ret:
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                self.update_zoom(frame_rgb)
+                
+                # Aspect Ratio Resizing
+                display_img = cv2.resize(frame_rgb, (self.render_w, self.render_h))
+                self.photo = PIL.ImageTk.PhotoImage(image=PIL.Image.fromarray(display_img))
+                
+                self.canvas.delete("all")
+                self.canvas.create_image(self.off_x, self.off_y, image=self.photo, anchor=tk.NW)
+                self.draw_overlay()
+                self.update_graph()
+
+    def update_zoom(self, frame_rgb):
+        target_pos = self.points.get(self.current_frame) or (self.src_w // 2, self.src_h // 2)
+        tx, ty = int(target_pos[0]), int(target_pos[1])
+        sz = 60
+        y1, y2 = max(0, ty-sz), min(self.src_h, ty+sz)
+        x1, x2 = max(0, tx-sz), min(self.src_w, tx+sz)
+        crop = frame_rgb[y1:y2, x1:x2]
+        if crop.size > 0:
+            lab = cv2.cvtColor(crop, cv2.COLOR_RGB2LAB)
+            l, a, b = cv2.split(lab)
+            cl = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8)).apply(l)
+            crop_zoom = cv2.resize(cv2.cvtColor(cv2.merge((cl,a,b)), cv2.COLOR_LAB2RGB), (250, 250))
+            self.zoom_photo = PIL.ImageTk.PhotoImage(image=PIL.Image.fromarray(crop_zoom))
+            self.zoom_canvas.delete("all")
+            self.zoom_canvas.create_image(0, 0, image=self.zoom_photo, anchor=tk.NW)
 
     def on_window_resize(self, event):
         if event.widget == self.canvas:
@@ -104,50 +184,6 @@ class BrianDashboard:
         if 0 <= new_f < self.total_frames:
             self.current_frame = new_f
             self.scrub.set(new_f)
-
-    def load_project_data(self, path):
-        self.project_path = path
-        video_path = os.path.join(self.project_path, "03_DATA", "review_telemetry.mp4")
-        if os.path.exists(video_path):
-            self.vid = cv2.VideoCapture(video_path)
-            self.total_frames = int(self.vid.get(cv2.CAP_PROP_FRAME_COUNT))
-            self.scrub.config(to=self.total_frames - 1)
-            self.render_frame()
-            self.status_lbl.config(text=f"ACTIVE: {os.path.basename(path)}", fg="lime")
-
-    def load_project(self):
-        path = filedialog.askdirectory(initialdir="~/Projects/UAP_Data")
-        if path: self.load_project_data(path)
-
-    def render_frame(self):
-        if self.vid:
-            self.vid.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
-            ret, frame = self.vid.read()
-            if ret:
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                self.update_zoom(frame_rgb)
-                display_img = cv2.resize(frame_rgb, (self.render_w, self.render_h))
-                self.photo = PIL.ImageTk.PhotoImage(image=PIL.Image.fromarray(display_img))
-                self.canvas.delete("all")
-                self.canvas.create_image(self.off_x, self.off_y, image=self.photo, anchor=tk.NW)
-                self.draw_overlay()
-
-    def update_zoom(self, frame_rgb):
-        target_pos = self.points.get(self.current_frame) or (self.src_w // 2, self.src_h // 2)
-        tx, ty = int(target_pos[0]), int(target_pos[1])
-        sz = 60
-        y1, y2 = max(0, ty-sz), min(self.src_h, ty+sz)
-        x1, x2 = max(0, tx-sz), min(self.src_w, tx+sz)
-        crop = frame_rgb[y1:y2, x1:x2]
-        if crop.size > 0:
-            lab = cv2.cvtColor(crop, cv2.COLOR_RGB2LAB)
-            l, a, b = cv2.split(lab)
-            cl = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8)).apply(l)
-            crop_enhanced = cv2.cvtColor(cv2.merge((cl,a,b)), cv2.COLOR_LAB2RGB)
-            crop_zoom = cv2.resize(crop_enhanced, (250, 250), interpolation=cv2.INTER_CUBIC)
-            self.zoom_photo = PIL.ImageTk.PhotoImage(image=PIL.Image.fromarray(crop_zoom))
-            self.zoom_canvas.delete("all")
-            self.zoom_canvas.create_image(0, 0, image=self.zoom_photo, anchor=tk.NW)
 
     def on_left_click(self, event):
         vx, vy = event.x - self.off_x, event.y - self.off_y
@@ -190,9 +226,9 @@ class BrianDashboard:
         fov_h = 2 * np.degrees(np.arctan(self.sensor_w_mm / (2 * self.focal_mm)))
         total_deg = total_px * (fov_h / 1920)
         real_dist_m = 2 * self.dist_m * np.sin(np.radians(total_deg / 2))
-        velocity_ms = real_dist_m / time_sec
-        self.lbl_mach.config(text=f"MACH: {velocity_ms / 340.29:.2f}")
-        self.lbl_gforce.config(text=f"G-FORCE: {(velocity_ms**2 / (real_dist_m / 2)) / 9.81 if real_dist_m > 0 else 0:.1f}")
+        vel = real_dist_m / time_sec
+        self.lbl_mach.config(text=f"MACH: {vel / 340.29:.2f}")
+        self.lbl_gforce.config(text=f"G-FORCE: {(vel**2 / (real_dist_m / 2)) / 9.81 if real_dist_m > 0 else 0:.1f}")
 
     def on_scrub(self, val):
         self.current_frame = int(val); self.render_frame()
@@ -201,4 +237,4 @@ class BrianDashboard:
         self.auto_bridge(); self.window.destroy()
 
 if __name__ == "__main__":
-    root = tk.Tk(); app = BrianDashboard(root, "LUMICRON FORENSIC COCKPIT v5.9"); root.mainloop()
+    root = tk.Tk(); app = BrianDashboard(root, "LUMICRON FORENSIC COCKPIT v6.0"); root.mainloop()
